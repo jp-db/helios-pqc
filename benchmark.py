@@ -1,6 +1,7 @@
 import gc
 import time
-from logging import DEBUG
+import statistics
+from logging import DEBUG, WARNING, INFO
 
 from lbvs_lib.classes import NMOD_POLY_TYPE, Commitment, OPENING_TYPE, ctypes
 from lbvs_lib.compile import shared_library, MODP, DEGREE, WIDTH
@@ -9,6 +10,16 @@ from lbvs_lib.shuffle import Shuffle
 from lbvs_lib.utils import new_random_question, get_all_voting_combinations, random
 from lbvs_lib.primitives import flint_rand, commitment_scheme
 from lbvs_lib.logger import set_level, VERBOSE, LOGGER
+
+def print_results(results, labels, n_voters):
+    means = {label: statistics.mean(results[label]) for label in labels}
+    medians = {label: statistics.median(results[label]) for label in labels}
+    stdevs = {label: statistics.stdev(results[label]) for label in labels}
+
+    for label in labels:
+        LOGGER.warning(f"Time for {label} for {n_voters} voters: {means[label]}")
+        LOGGER.warning(f"Median time for {label} for {n_voters} voters: {medians[label]}")
+        LOGGER.warning(f"Standard deviation for {label} for {n_voters} voters: {stdevs[label]}")
 
 def test_shuffle(**kwargs):
     voters_tests = kwargs["voters_tests"]
@@ -75,17 +86,15 @@ def test_algorithms(**kwargs):
     algs = ("SETUP", "REGISTER", "CAST", "CODE", "COUNT", "VERIFY")
 
     for n_voters in voters_tests:
-        differences = {
-            alg: 0 for alg in algs
+        values = {
+            alg: [] for alg in algs
         }
         for i in range(n_executions):
             LOGGER.log(VERBOSE, f"EXECUTION {i}")
             results = algorithms_benchmark(n_voters)
             for j, alg in enumerate(algs):
-                differences[alg] += results[j]
-        for alg in algs:
-            differences[alg] /= n_executions
-            LOGGER.warning(f"Time for {alg} for {n_voters} voters: {differences[alg]}")
+                values[alg].append(results[j])
+        print_results(values, algs, n_voters)
 
 def test_helios(**kwargs):
     label = "HELIOS"
@@ -109,26 +118,23 @@ def test_prot(label, prot_function, answers_tests, voters_tests, n_executions, n
         for n_voters in voters_tests:
             LOGGER.info(f"ANSWER SIZE: {answer_size} --- VOTERS: {n_voters}")
 
-            results = [0] * 4
-            results_alg = [0] * 6
+            results = {phase: [] for phase in phase_name}
+            results_alg = {alg: [] for alg in algorithms}
 
             for j in range(n_executions):
                 LOGGER.info(f"EXECUTION {j}")
                 votes = [[list(random.choice(comp)) for comp in comb_per_question] for _ in range(n_voters)]
                 results_iter, results_iter_alg = prot_function(n_voters, questions, votes)
 
-                for i in range(len(results)):
-                    results[i] += results_iter[i]
-                for i in range(len(results_alg)):
-                    results_alg[i] += results_iter_alg[i]
+                for i, phase in enumerate(phase_name):
+                    results[phase].append(results_iter[i])
+                for i, alg in enumerate(algorithms):
+                    results_alg[alg].append(results_iter_alg[i])
                 gc.collect()
 
-            for i in range(len(results)):
-                results[i] /= n_executions
-                LOGGER.warning(f"Time for {phase_name[i]} for {label}: {results[i]}")
-            for i in range(len(results_alg)):
-                results_alg[i] /= n_executions
-                LOGGER.warning(f"Time for {algorithms[i]} for {label}: {results_alg[i]}")
+            print_results(results, phase_name, n_voters)
+            print_results(results_alg, algorithms, n_voters)
+
 
 def test_register_with_rct(**kwargs):
     from lbvs_lib.protocol_bench import benchmark_registration_with_rct
